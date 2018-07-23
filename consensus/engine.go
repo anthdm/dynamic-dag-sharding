@@ -111,7 +111,7 @@ func (e *Engine) HandleMessage(from uint64, msg Message) error {
 		if result != nil {
 			// only node 0 will print something on the screen.
 			if e.id == 0 && result.status == Valid {
-				log.Printf("TX %s => is considered final", hex.EncodeToString(result.hash))
+				log.Printf("TX %s confirmed", hex.EncodeToString(result.hash))
 			}
 		}
 	default:
@@ -187,11 +187,12 @@ func (e *Engine) handleResponse(from uint64, r Response) (*Result, error) {
 
 func (e *Engine) handleTransaction(tx Transaction) error {
 	// TODO: simulate tx verification. For now just set valid.
-	status := e.verifyTransaction(tx)
+	status := verifyTransaction(tx)
 
-	_, ok := e.mempool[string(tx.Hash())]
-	if !ok {
+	if e.getState(tx.Hash()) == nil {
+		e.lock.Lock()
 		e.mempool[string(tx.Hash())] = newTxState(tx, status)
+		e.lock.Unlock()
 		return e.sendQuery(tx, status)
 	}
 	return nil
@@ -209,7 +210,7 @@ func (e *Engine) sendResponse(to uint64, hash []byte, status TxStatus) error {
 	return nil
 }
 
-func (e *Engine) verifyTransaction(tx Transaction) TxStatus {
+func verifyTransaction(tx Transaction) TxStatus {
 	ourTx := tx.(*TX)
 	if ecdsa.Verify(&ourTx.PublicKey, ourTx.Hash(), ourTx.R, ourTx.S) {
 		return Valid

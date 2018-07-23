@@ -23,7 +23,7 @@ type TX struct {
 	S *big.Int
 }
 
-func RandomTx() *TX {
+func randomTx() *TX {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), crand.Reader)
 	if err != nil {
 		log.Fatal(err)
@@ -61,7 +61,7 @@ func (tx *TX) Hash() []byte {
 	return sha.Sum(nil)
 }
 
-var txInterval = 50 * time.Millisecond
+var txInterval = 3 * time.Millisecond
 
 type NetworkSimulation struct {
 	engines map[uint64]*Engine
@@ -89,18 +89,27 @@ func NewNetworkSimulation(n int, lat int) *NetworkSimulation {
 }
 
 func (sim *NetworkSimulation) Run() {
-	txTimer := time.NewTimer(txInterval)
+	var (
+		txTimer   = time.NewTimer(txInterval)
+		quitTimer = time.NewTimer(10 * time.Second)
+	)
+
+free:
 	for {
 		select {
 		case <-txTimer.C:
-			e := sim.engines[uint64(rand.Intn(len(sim.engines)))]
-			tx := RandomTx()
-			log.Printf("sending tx %s into the network", hex.EncodeToString(tx.Hash()))
+			tx := randomTx()
+			log.Printf("new TX %s", hex.EncodeToString(tx.Hash()))
 
-			if err := e.handleTransaction(tx); err != nil {
-				log.Fatal(err)
-			}
+			e := sim.engines[uint64(rand.Intn(len(sim.engines)))]
+			go func(e *Engine) {
+				if err := e.handleTransaction(tx); err != nil {
+					log.Fatal(err)
+				}
+			}(e)
 			txTimer.Reset(txInterval)
+		case <-quitTimer.C:
+			break free
 		case msg := <-sim.msgCh:
 			switch msg.Payload.(type) {
 			case Query:
