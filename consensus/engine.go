@@ -3,7 +3,6 @@ package consensus
 import (
 	"crypto/ecdsa"
 	"encoding/hex"
-	"fmt"
 	"log"
 	"sync"
 )
@@ -20,11 +19,13 @@ const (
 const (
 	convictionTreshold = 0.75
 	treshold           = 0.75
-	maxEpoch           = 4
+	maxEpoch           = 3
 	samples            = 4
 )
 
 type TxState struct {
+	tx Transaction
+
 	responses []TxStatus
 	epoch     uint64
 
@@ -33,7 +34,6 @@ type TxState struct {
 	cnt        int
 
 	status TxStatus
-	tx     Transaction
 
 	// The last status decision that is been made in an epoch.
 	lastStatus TxStatus
@@ -86,6 +86,9 @@ type Engine struct {
 	id    uint64
 	msgCh chan<- Message
 
+	// The shard number this engine belongs to.
+	shard int
+
 	lock    sync.RWMutex
 	mempool map[string]*TxState
 }
@@ -111,11 +114,12 @@ func (e *Engine) HandleMessage(from uint64, msg Message) error {
 		if result != nil {
 			// only node 0 will print something on the screen.
 			if e.id == 0 && result.status == Valid {
-				log.Printf("TX %s confirmed", hex.EncodeToString(result.hash))
+				e.lock.Lock()
+				delete(e.mempool, string(result.hash))
+				e.lock.Unlock()
+				log.Printf("[CONFIRMED]\tshard: %d\t%s", e.shard, hex.EncodeToString(result.hash))
 			}
 		}
-	default:
-		_ = p
 	}
 	return nil
 }
@@ -145,7 +149,7 @@ type Result struct {
 func (e *Engine) handleResponse(from uint64, r Response) (*Result, error) {
 	state := e.getState(r.Hash)
 	if state == nil {
-		return nil, fmt.Errorf("could not find state related to response for tx %v", r.Hash)
+		return nil, nil //fmt.Errorf("could not find state related to response for tx %v", r.Hash)
 	}
 
 	e.lock.Lock()
@@ -186,6 +190,14 @@ func (e *Engine) handleResponse(from uint64, r Response) (*Result, error) {
 }
 
 func (e *Engine) handleTransaction(tx Transaction) error {
+	ourTx := tx.(*TX)
+
+	if ourTx.Shard != e.shard {
+		log.Printf("[RELAY]\t\tshard: %d\t%s", e.shard, hex.EncodeToString(tx.Hash()))
+		e.msgCh <- Message{e.id, nil, tx}
+		return nil
+	}
+
 	// TODO: simulate tx verification. For now just set valid.
 	status := verifyTransaction(tx)
 

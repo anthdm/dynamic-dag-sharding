@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	sim := consensus.NewNetworkSimulation(10, 0)
+	sim := consensus.NewNetworkSimulation(16, 100) // zero network latency for now.
 	sim.Run()
 }
 

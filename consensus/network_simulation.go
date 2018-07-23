@@ -18,6 +18,8 @@ type TX struct {
 	Data      uint64
 	PublicKey ecdsa.PublicKey
 
+	Shard int
+
 	// Signature values
 	R *big.Int
 	S *big.Int
@@ -31,6 +33,7 @@ func randomTx() *TX {
 	tx := &TX{
 		Nonce: rand.Uint64(),
 		Data:  rand.Uint64(),
+		Shard: rand.Intn(len([]int{0, 1})),
 	}
 	tx.Sign(priv)
 	return tx
@@ -74,7 +77,8 @@ func NewNetworkSimulation(n int, lat int) *NetworkSimulation {
 	engines := make(map[uint64]*Engine)
 	// TODO: Make sure this channel will not block all goroutines! 128 buffer
 	// per engine should be fine though.
-	msgCh := make(chan Message, n*512)
+	//msgCh := make(chan Message, n*512)
+	msgCh := make(chan Message)
 
 	for i := 0; i < n; i++ {
 		id := uint64(i)
@@ -99,7 +103,7 @@ free:
 		select {
 		case <-txTimer.C:
 			tx := randomTx()
-			log.Printf("new TX %s", hex.EncodeToString(tx.Hash()))
+			log.Printf("[NEW]\t\tshard: %d\t%s", tx.Shard, hex.EncodeToString(tx.Hash()))
 
 			e := sim.engines[uint64(rand.Intn(len(sim.engines)))]
 			go func(e *Engine) {
@@ -111,7 +115,16 @@ free:
 		case <-quitTimer.C:
 			break free
 		case msg := <-sim.msgCh:
-			switch msg.Payload.(type) {
+			switch p := msg.Payload.(type) {
+			case *Transaction:
+				for _, e := range sim.sampleEngines(samples) {
+					go func(e *Engine) {
+						time.Sleep(sim.latency)
+						if err := e.handleTransaction(*p); err != nil {
+							log.Fatal(err)
+						}
+					}(e)
+				}
 			case Query:
 				for _, e := range sim.sampleEngines(samples) {
 					go func(e *Engine) {
